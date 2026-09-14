@@ -1,0 +1,56 @@
+name: FLOHKI Android Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Projekt laden
+        uses: actions/checkout@v4
+
+      - name: Java 17 installieren
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK vorbereiten
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle 8.13 installieren
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: FLOHKI entpacken
+        run: |
+          rm -rf flohki-build
+          mkdir -p flohki-build
+          unzip -o FLOHKI_PlayStore_Ready.zip -d flohki-build
+          echo "=== Dateien ==="
+          find flohki-build -maxdepth 6 -type f | sort
+
+      - name: Android-Projekt finden und bauen
+        run: |
+          SETTINGS=$(find flohki-build -type f \( -name "settings.gradle.kts" -o -name "settings.gradle" \) | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "FEHLER: settings.gradle.kts wurde nicht gefunden"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "Projekt gefunden unter: $PROJECT_DIR"
+
+          cd "$PROJECT_DIR"
+          gradle bundleRelease --stacktrace
+
+      - name: AAB speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLOHKI-AAB
+          path: flohki-build/**/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
