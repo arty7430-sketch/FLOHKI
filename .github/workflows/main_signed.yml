@@ -1,0 +1,80 @@
+name: FLOHKI Android Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Projekt laden
+        uses: actions/checkout@v4
+
+      - name: Java 17 installieren
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK vorbereiten
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle 8.13 installieren
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Keystore wiederherstellen
+        env:
+          FLOHKI_KEYSTORE_BASE64: ${{ secrets.FLOHKI_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$FLOHKI_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/flohki-release.jks"
+          test -s "$GITHUB_WORKSPACE/flohki-release.jks"
+
+      - name: FLOHKI entpacken
+        run: |
+          rm -rf flohki-build
+          mkdir -p flohki-build
+          unzip -o FLOHKI_PlayStore_Ready.zip -d flohki-build
+          echo "=== Dateien ==="
+          find flohki-build -maxdepth 6 -type f | sort
+
+      - name: Android-Projekt finden und signiert bauen
+        env:
+          FLOHKI_KEYSTORE_PASSWORD: ${{ secrets.FLOHKI_KEYSTORE_PASSWORD }}
+          FLOHKI_KEY_PASSWORD: ${{ secrets.FLOHKI_KEY_PASSWORD }}
+        run: |
+          SETTINGS=$(find flohki-build -type f \( -name "settings.gradle.kts" -o -name "settings.gradle" \) | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "FEHLER: settings.gradle.kts/settings.gradle wurde nicht gefunden"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "Projekt gefunden unter: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
+
+          gradle bundleRelease --stacktrace \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/flohki-release.jks" \
+            -Pandroid.injected.signing.store.password="$FLOHKI_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="flohki" \
+            -Pandroid.injected.signing.key.password="$FLOHKI_KEY_PASSWORD"
+
+      - name: Signatur prüfen
+        run: |
+          AAB=$(find flohki-build -type f -path "*/build/outputs/bundle/release/*.aab" | head -n 1)
+          if [ -z "$AAB" ]; then
+            echo "FEHLER: Keine AAB gefunden"
+            exit 1
+          fi
+          echo "AAB gefunden: $AAB"
+          jarsigner -verify -verbose -certs "$AAB"
+
+      - name: AAB speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLOHKI-AAB-SIGNED
+          path: flohki-build/**/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
