@@ -1,26 +1,56 @@
-# FLOHKI Android 1.0
+name: FLOHKI Android Build
 
-Dieses Projekt ist eine native Android-Hülle mit einem vollständig offline nutzbaren FLOHKI-Marktplatz-Prototypen. Es wurde für `compileSdk/targetSdk 36` vorbereitet.
+on:
+  workflow_dispatch:
 
-## Öffnen und App Bundle bauen
-1. Aktuelles Android Studio installieren.
-2. Diesen Ordner als Projekt öffnen.
-3. Android SDK Platform 36 installieren, falls Android Studio danach fragt.
-4. Projekt synchronisieren.
-5. In Android Studio: **Build > Generate Signed App Bundle or APK > Android App Bundle**.
-6. Einen eigenen Upload-Key/Keystore erstellen oder auswählen.
-7. Release-AAB erzeugen und in die Google Play Console hochladen.
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-## Was bereits funktioniert
-- Startseite/Marktplatz
-- Suche
-- Favoriten mit lokaler Speicherung
-- Foto-/Galerieauswahl
-- lokaler KI-ähnlicher Verkaufsflow mit Preisvorschlägen
-- Anzeige erstellen und lokal veröffentlichen
-- Chat-Demo
-- Profil
-- App-Icon, Theme und Store-Texte
+    steps:
+      - name: Projekt laden
+        uses: actions/checkout@v4
 
-## Wichtige Grenze vor einem echten öffentlichen Marktstart
-Diese Version ist **offline/lokal**. Mehrere echte Nutzer können noch nicht miteinander handeln. Für einen öffentlichen Marktplatz braucht FLOHKI vor dem produktiven Launch mindestens Authentifizierung, Backend/Cloud-Datenbank, Bildspeicher, echte KI-/Preisquelle, Moderation/Meldewege, Datenschutz/Impressum und optional Push/Payment. Dafür sind externe Konten/Schlüssel nötig, die nicht sinnvoll in ein öffentliches App-Paket eingebaut werden dürfen.
+      - name: Java 17 installieren
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK vorbereiten
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle 8.13 installieren
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: FLOHKI entpacken
+        run: |
+          rm -rf flohki-build
+          mkdir -p flohki-build
+          unzip -o FLOHKI_PlayStore_Ready.zip -d flohki-build
+          echo "=== Dateien ==="
+          find flohki-build -maxdepth 6 -type f | sort
+
+      - name: Android-Projekt finden und bauen
+        run: |
+          SETTINGS=$(find flohki-build -type f \( -name "settings.gradle.kts" -o -name "settings.gradle" \) | head -1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "FEHLER: settings.gradle.kts wurde nicht gefunden."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "Projekt gefunden unter: $PROJECT_DIR"
+
+          cd "$PROJECT_DIR"
+          gradle bundleRelease --stacktrace
+
+      - name: AAB speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLOHKI-AAB
+          path: flohki-build/**/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
